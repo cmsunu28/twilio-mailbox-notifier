@@ -1,3 +1,5 @@
+#include <LowPower.h>
+
 /***************************************************
   This is an example for our Adafruit FONA Cellular Module
 
@@ -25,13 +27,15 @@ Open up the serial console on the Arduino at 115200 baud to interact with FONA
 Note that if you need to set a GPRS APN, username, and password scroll down to
 the commented section below at the end of the setup() function.
 */
-#include "Adafruit_FONA.h"
+#include <Adafruit_FONA.h>
 
 
 #define FONA_RX 9
 #define FONA_TX 8
 #define FONA_RST 4
 #define FONA_RI 7
+
+#define FONA_INTERRUPT 0
 
 char replybuffer[255];
 
@@ -62,10 +66,13 @@ uint8_t type;
 int state=0;
 
 int waitTime=10000; // wait for a while for the SMS feature to boot up before you try to send a text
+int startTime=0;
 
 void setup() {
-  // set up FONA: code from Adafruit
+
+  pinMode(FONA_INTERRUPT,INPUT);
   
+  // set up FONA: code from Adafruit
   Serial.begin(115200);
   Serial.println(F("FONA basic test"));
   Serial.println(F("Initializing....(May take 3 seconds)"));
@@ -105,12 +112,14 @@ void setup() {
   // set APN
   fona.setGPRSNetworkSettings(F("wireless.twilio.com"));
 
+  startTime=millis();
+
 }
 
 
 void loop() {
   if (state==0) {
-    if (millis()>waitTime) {
+    if (millis()-startTime>waitTime) {
         if (getRSSI()>10) {
           state=1;    
         }
@@ -123,19 +132,39 @@ void loop() {
   if (state==2) {
     // go to sleep
     sleepMode();
-    state=-1;
   }
-  
+
+  if (state==3) {
+    // modem is asleep
+    // put the uC asleep as well
+    if (millis()-startTime>waitTime) {
+      // put the uC in sleep mode as well
+      // Disable USB clock 
+      attachInterrupt(0, FONA_INTERRUPT, HIGH);
+      LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
+      // now you are asleep
+      // this does something weird to the serial monitor
+      detachInterrupt(0);
+      state=0;
+    }
+  }
 }
 
 void readSensor() {
   // reads digital sensor and returns 0 or 1
+  startTime=millis();
 }
 
 void sleepMode() {
   // puts the FONA in sleep mode
   //  AT+CSCLK
-  fona.sendCheckReply(F("AT+CSCLK=1"),F("OK"));
+  startTime=millis();
+  if (!fona.sendCheckReply(F("AT+CSCLK=1"),F("OK"))) {
+    Serial.println(F("Failed"));
+    } else {
+      Serial.println(F("OK!"));
+      state=3;
+    }
 }
 
 void sendM2M() {
