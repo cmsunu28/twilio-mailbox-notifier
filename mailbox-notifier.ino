@@ -1,3 +1,6 @@
+#include <LowPower.h>
+
+#include <Adafruit_FONA.h>
 /***************************************************
   This is an example for our Adafruit FONA Cellular Module
 
@@ -17,21 +20,13 @@
   BSD license, all text above must be included in any redistribution
  ****************************************************/
 
-/*
-THIS CODE IS STILL IN PROGRESS!
-
-Open up the serial console on the Arduino at 115200 baud to interact with FONA
-
-Note that if you need to set a GPRS APN, username, and password scroll down to
-the commented section below at the end of the setup() function.
-*/
-#include <Adafruit_FONA.h>
-
-
 #define FONA_RX 9
 #define FONA_TX 8
 #define FONA_RST 4
 #define FONA_RI 7
+
+#define FONA_INTERRUPT 2 // "Interrupt pin #2" is actually GPIO 0
+int DTR_CONTROL=5; // According to the pinout, this is our DTR pin
 
 // Uses software serial
 #include <SoftwareSerial.h>
@@ -46,19 +41,20 @@ Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 uint8_t type;
 
 // state variable
-// -1: just booted up
-// 0: reading sensor
-// 1: sensor went off
-// 2: M2M sent successfully! checking battery
-// 3: sending sms if the battery is low
-// 4: going back to 0
+// -1: just booted up, configure modem
+// 0: waiting for mail (light)
+// 1: sensor went off (saw the light!)
 int state=-1;
+// should be -1 on boot, then go between 0 and 1.
 
 //int lightPin=0;
 
 void setup() {
-  pinMode(0,INPUT); // this will be the interrupt
-  
+//  pinMode(lightPin,INPUT); // this will be the interrupt
+  pinMode(DTR_CONTROL,OUTPUT); // this controls the modem
+  digitalWrite(DTR_CONTROL,LOW); // Make sure it starts with the modem on!
+  delay(5000);
+
   // set up FONA: code from Adafruit
   Serial.begin(115200);
   Serial.println(F("FONA basic test"));
@@ -99,8 +95,6 @@ void setup() {
   // set APN
   fona.setGPRSNetworkSettings(F("wireless.twilio.com"));
 
-  attachInterrupt(2,wakeUp,FALLING);
-
 }
 
 
@@ -108,27 +102,27 @@ void loop() {
   
   if (state==-1) {   // enable modem sleep mode in automatic
     if (sleepModem()){
-      state=1;
+      digitalWrite(DTR_CONTROL,HIGH); // puts modem to sleep manually
+      delay(500);
+      state=0;
     }
   }
 
   if (state==0) {
-//      Serial.println("waiting for signal");
-//      if (digitalRead(lightPin)) {
-//        delay(800);
-//        Serial.println("0");
-//      }
-//      else {
-//        Serial.println("1");
-//        state=1;
-//      }
+    
+    // Enter power down state with ADC and BOD module disabled.
+    // Wake up when wake up pin is low.
+    Serial.println("going to sleep");
+    attachInterrupt(2,wakeUp,FALLING);
+    LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); 
+    
   }
   
   if (state==1) { // send the message
     if (getRSSI()>9) {
       if (sendM2M()) {
         delay(5000);
-        state=2;
+        state=0;
       }      
     }
     else {
@@ -136,34 +130,24 @@ void loop() {
     }
   }
   
-  if (state==2) { // sent message! Check battery.
-    uint16_t b=readBatt();
-    if (b>0) {
-      if (b<500) {
-        state=3;
-      }
-    }
-  }
-
-  if (state==3) {
-    
-  }
-  
 }
 
 int sleepModem() {
-  // puts the FONA in sleep mode
-  //  AT+CSCLK
-  if (!fona.sendCheckReply(F("AT+CSCLK=2"),F("OK"))) {
-    Serial.println(F("Failed to put modem in autosleep"));
+//   puts the FONA in sleep mode
+//    AT+CSCLK
+  if (!fona.sendCheckReply(F("AT+CSCLK=1"),F("OK"))) {
+    Serial.println(F("Changing modem to DTR control"));
     return 0;
     } else {
-      Serial.println(F("Put modem in autosleep!"));
+      Serial.println(F("Modem put in DTR control"));
       return 1;
     }
 }
 
 void wakeUp() {
+  Serial.println("woke up!");
+  digitalWrite(DTR_CONTROL,LOW); // wakes modem up manually
+  delay(500); // give it half a second to wake up
   state=1;
 }
 
@@ -194,16 +178,4 @@ int getRSSI() {
   Serial.print(r); Serial.println(F(" dBm"));
 
   return n;
-}
-
-int readBatt() {
-  // read the battery voltage and percentage
-  uint16_t vbat;
-  if (! fona.getBattVoltage(&vbat)) {
-    Serial.println(F("Failed to read Batt"));
-    return -1;
-  } else {
-    Serial.print(F("VBat = ")); Serial.print(vbat); Serial.println(F(" mV"));
-    return vbat;
-  }
 }
