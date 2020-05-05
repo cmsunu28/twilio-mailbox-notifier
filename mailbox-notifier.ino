@@ -1,5 +1,3 @@
-#include <LowPower.h>
-
 /***************************************************
   This is an example for our Adafruit FONA Cellular Module
 
@@ -35,8 +33,6 @@ the commented section below at the end of the setup() function.
 #define FONA_RST 4
 #define FONA_RI 7
 
-#define FONA_INTERRUPT 0
-
 // Uses software serial
 #include <SoftwareSerial.h>
 SoftwareSerial fonaSS = SoftwareSerial(FONA_TX, FONA_RX);
@@ -50,15 +46,18 @@ Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 uint8_t type;
 
 // state variable
-// -1: low power mode
-// 0: turned on for the first time, test RSSI
+// -1: just booted up
+// 0: reading sensor
 // 1: sensor went off
-// 2: M2M sent successfully
-int state=0;
+// 2: M2M sent successfully! checking battery
+// 3: sending sms if the battery is low
+// 4: going back to 0
+int state=-1;
+
+//int lightPin=0;
 
 void setup() {
-
-  pinMode(FONA_INTERRUPT,INPUT);
+  pinMode(0,INPUT); // this will be the interrupt
   
   // set up FONA: code from Adafruit
   Serial.begin(115200);
@@ -100,50 +99,55 @@ void setup() {
   // set APN
   fona.setGPRSNetworkSettings(F("wireless.twilio.com"));
 
+  attachInterrupt(2,wakeUp,FALLING);
 
 }
 
 
 void loop() {
   
-  if (state==0) {   // enable modem sleep mode in automatic
+  if (state==-1) {   // enable modem sleep mode in automatic
     if (sleepModem()){
       state=1;
     }
   }
+
+  if (state==0) {
+//      Serial.println("waiting for signal");
+//      if (digitalRead(lightPin)) {
+//        delay(800);
+//        Serial.println("0");
+//      }
+//      else {
+//        Serial.println("1");
+//        state=1;
+//      }
+  }
   
-  if (state==1) { // needs to send the message
-    if (sendM2M()) {
-      delay(5000);
-      state=2;
+  if (state==1) { // send the message
+    if (getRSSI()>9) {
+      if (sendM2M()) {
+        delay(5000);
+        state=2;
+      }      
     }
     else {
-      delay(1000);
+      delay(3000);
     }
   }
   
-  if (state==2) { // sent message! Go to sleep.
-    // go to sleep
-    Serial.println("Modem going to sleep.");
-    if (sleepModem()) {state=3;}
+  if (state==2) { // sent message! Check battery.
+    uint16_t b=readBatt();
+    if (b>0) {
+      if (b<500) {
+        state=3;
+      }
+    }
   }
 
-  if (state==3) { // Modem is asleep, now put the uC to sleep also.
-      Serial.println("going to sleep");
-//      sleepuC();
-//      detachInterrupt(FONA_INTERRUPT);
-//      state=1;
-      if (digitalRead(FONA_INTERRUPT)) {
-        delay(50);
-        Serial.println("0");
-      }
-      else {
-        Serial.println("1");
-        state=1;
-      }
+  if (state==3) {
+    
   }
-
-  delay(100);
   
 }
 
@@ -159,23 +163,8 @@ int sleepModem() {
     }
 }
 
-int wakeModem() {
-  // wakes FONA up from sleep mode
-  if (!fona.sendCheckReply(F("AT+CSCLK=0"),F("OK"))) {
-    Serial.println(F("Failed to wake up modem"));
-    return 0;
-    } else {
-      Serial.println(F("Woke up modem!"));
-      return 1;
-    }  
-}
-
-void sleepuC() {
-  // put the uC in sleep mode as well
-  // Disable USB clock 
-  attachInterrupt(0, FONA_INTERRUPT, LOW);
-  LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
-  // now you are asleep
+void wakeUp() {
+  state=1;
 }
 
 int sendM2M() {
@@ -185,6 +174,7 @@ int sendM2M() {
     return 0;
   } else {
     Serial.println(F("Sent SMS!"));
+    state=2;
     return 1;
   }
 }
@@ -206,18 +196,14 @@ int getRSSI() {
   return n;
 }
 
-void readBatt() {
+int readBatt() {
   // read the battery voltage and percentage
   uint16_t vbat;
   if (! fona.getBattVoltage(&vbat)) {
     Serial.println(F("Failed to read Batt"));
+    return -1;
   } else {
     Serial.print(F("VBat = ")); Serial.print(vbat); Serial.println(F(" mV"));
-  }
-
-  if (! fona.getBattPercent(&vbat)) {
-    Serial.println(F("Failed to read Batt"));
-  } else {
-    Serial.print(F("VPct = ")); Serial.print(vbat); Serial.println(F("%"));
+    return vbat;
   }
 }
