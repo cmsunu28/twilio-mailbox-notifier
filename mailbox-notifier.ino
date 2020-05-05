@@ -37,36 +37,24 @@ the commented section below at the end of the setup() function.
 
 #define FONA_INTERRUPT 0
 
-char replybuffer[255];
-
-// We default to using software serial. If you want to use hardware serial
-// (because softserial isnt supported) comment out the following three lines 
-// and uncomment the HardwareSerial line
+// Uses software serial
 #include <SoftwareSerial.h>
 SoftwareSerial fonaSS = SoftwareSerial(FONA_TX, FONA_RX);
 SoftwareSerial *fonaSerial = &fonaSS;
 
-// Hardware serial is also possible!
-//  HardwareSerial *fonaSerial = &Serial1;
-
 // Use this for FONA 800 and 808s
 Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
-// Use this one for FONA 3G
+// Use this one for FONA 3G. We didn't test that one though.
 //Adafruit_FONA_3G fona = Adafruit_FONA_3G(FONA_RST);
-
-uint8_t readline(char *buff, uint8_t maxbuff, uint16_t timeout = 0);
 
 uint8_t type;
 
 // state variable
 // -1: low power mode
-// 0: sensor went off
+// 0: turned on for the first time, test RSSI
 // 1: sensor went off
 // 2: M2M sent successfully
 int state=0;
-
-int waitTime=10000; // wait for a while for the SMS feature to boot up before you try to send a text
-int startTime=0;
 
 void setup() {
 
@@ -112,68 +100,92 @@ void setup() {
   // set APN
   fona.setGPRSNetworkSettings(F("wireless.twilio.com"));
 
-  startTime=millis();
 
 }
 
 
 void loop() {
-  if (state==0) {
-    if (millis()-startTime>waitTime) {
-        if (getRSSI()>10) {
-          state=1;    
-        }
+  
+  if (state==0) {   // enable modem sleep mode in automatic
+    if (sleepModem()){
+      state=1;
     }
   }
-  if (state==1) {
-    sendM2M();
-    delay(50);
+  
+  if (state==1) { // needs to send the message
+    if (sendM2M()) {
+      delay(5000);
+      state=2;
+    }
+    else {
+      delay(1000);
+    }
   }
-  if (state==2) {
+  
+  if (state==2) { // sent message! Go to sleep.
     // go to sleep
-    sleepMode();
+    Serial.println("Modem going to sleep.");
+    if (sleepModem()) {state=3;}
   }
 
-  if (state==3) {
-    // modem is asleep
-    // put the uC asleep as well
-    if (millis()-startTime>waitTime) {
-      // put the uC in sleep mode as well
-      // Disable USB clock 
-      attachInterrupt(0, FONA_INTERRUPT, HIGH);
-      LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
-      // now you are asleep
-      // this does something weird to the serial monitor
-      detachInterrupt(0);
-      state=0;
-    }
+  if (state==3) { // Modem is asleep, now put the uC to sleep also.
+      Serial.println("going to sleep");
+//      sleepuC();
+//      detachInterrupt(FONA_INTERRUPT);
+//      state=1;
+      if (digitalRead(FONA_INTERRUPT)) {
+        delay(50);
+        Serial.println("0");
+      }
+      else {
+        Serial.println("1");
+        state=1;
+      }
   }
+
+  delay(100);
+  
 }
 
-void readSensor() {
-  // reads digital sensor and returns 0 or 1
-  startTime=millis();
-}
-
-void sleepMode() {
+int sleepModem() {
   // puts the FONA in sleep mode
   //  AT+CSCLK
-  startTime=millis();
-  if (!fona.sendCheckReply(F("AT+CSCLK=1"),F("OK"))) {
-    Serial.println(F("Failed"));
+  if (!fona.sendCheckReply(F("AT+CSCLK=2"),F("OK"))) {
+    Serial.println(F("Failed to put modem in autosleep"));
+    return 0;
     } else {
-      Serial.println(F("OK!"));
-      state=3;
+      Serial.println(F("Put modem in autosleep!"));
+      return 1;
     }
 }
 
-void sendM2M() {
+int wakeModem() {
+  // wakes FONA up from sleep mode
+  if (!fona.sendCheckReply(F("AT+CSCLK=0"),F("OK"))) {
+    Serial.println(F("Failed to wake up modem"));
+    return 0;
+    } else {
+      Serial.println(F("Woke up modem!"));
+      return 1;
+    }  
+}
+
+void sleepuC() {
+  // put the uC in sleep mode as well
+  // Disable USB clock 
+  attachInterrupt(0, FONA_INTERRUPT, LOW);
+  LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
+  // now you are asleep
+}
+
+int sendM2M() {
   // send an SMS!
   if (!fona.sendSMS("2936", "on")) {
-    Serial.println(F("Failed"));
+    Serial.println(F("Failed to send SMS"));
+    return 0;
   } else {
-    Serial.println(F("Sent!"));
-    state=2;
+    Serial.println(F("Sent SMS!"));
+    return 1;
   }
 }
 
