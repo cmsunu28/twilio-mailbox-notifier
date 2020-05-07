@@ -2,7 +2,7 @@
 
 More info and pictures at: https://www.twilio.com/blog/iot-mailbox-sensor-m2m-to-sms-functions
 
-![oink oink you have mail](/images/mailpig-demo.gif)
+![oink oink you have mail](/images/mailpig-vertical.jpg)
 
 MailPig waits for someone to open your mailbox and then sends you a text about it. You can configure the number (or numbers) to text and the message you want MailPig to send in the using [Twilio Functions](https://www.twilio.com/docs/runtime/functions?utm_campaign=ghmailpig).
 
@@ -101,9 +101,3 @@ One you have it working, go celebrate!
 
 ## Get notified
 That’s all! Enjoy being texted when the mail comes.
-
-![](/images/mailpig-demo.gif)
-
-Questions about the build? Feel free to leave comments and issues on the Github repo, find me on Twitter, or check out Twilio on Twitch, where I will inevitably stream a mailbox sensor build.
-
-Questions about Twilio? Sign up for an account to build one yourself, or talk to Sales about IoT connectivity solutions.
